@@ -50,7 +50,7 @@ namespace CsProjArrange
             SplitItemGroups = 1 << 4,
             NoRoot = All & ~CombineRootElements & ~SortRootElements,
         }
-
+     
         /// <summary>
         /// Arrange the project file using the specified options.
         /// </summary>
@@ -61,10 +61,46 @@ namespace CsProjArrange
         /// <param name="options">Options for the arrange.</param>
         public void Arrange(string inputFile, string outputFile, IList<string> stickyElementNames, IEnumerable<string> sortAttributes, ArrangeOptions options)
         {
+            // Load the document.
+            XDocument input;
+            if (inputFile == null)
+            {
+                input = XDocument.Load(Console.OpenStandardInput());
+            }
+            else
+            {
+                input = XDocument.Load(inputFile);
+            }
+
+            Arrange(input, stickyElementNames, sortAttributes, options);
+
+            // Backup input file if we are overwriting.
+            if ((inputFile != null) && (inputFile == outputFile)) {
+                File.Copy(inputFile, inputFile + ".bak", true);
+            }
+
+            if (outputFile == null) {
+                // Write the output to standard output.
+                var writerSettings = new XmlWriterSettings();
+                writerSettings.Encoding = Encoding.UTF8;
+                writerSettings.Indent = true;
+                using (var writer = XmlWriter.Create(Console.OpenStandardOutput(), writerSettings)) {
+                    input.WriteTo(writer);
+                }
+            } else {
+                // Write the output file.
+                input.Save(outputFile);
+            }
+        }
+
+        public void Arrange(XDocument input, IList<string> stickyElementNames, IEnumerable<string> sortAttributes, ArrangeOptions options)
+        {
             // Default values.
             var encoding = new UTF8Encoding(false);
-            if (stickyElementNames == null) {
-                stickyElementNames = new string[] {
+            if (stickyElementNames == null)
+            {
+                stickyElementNames = new string[]
+                {
                     // Primary
                     "Task",
                     "PropertyGroup",
@@ -85,99 +121,98 @@ namespace CsProjArrange
                     "Otherwise",
                 };
             }
-            if (sortAttributes == null) {
-                sortAttributes = new string[] {
+            if (sortAttributes == null)
+            {
+                sortAttributes = new string[]
+                {
                     "Include",
                 };
             }
+
             // Set up sorting comparers.
             nodeNameComparer = new NodeNameComparer(stickyElementNames);
             attributeKeyComparer = new AttributeKeyComparer(sortAttributes);
-            // Load the document.
-            XDocument input;
-            if (inputFile == null) {
-                input = XDocument.Load(Console.OpenStandardInput());
-            } else {
-                input = XDocument.Load(inputFile);
-            }
 
             var combineGroups =
                 input.Root.Elements()
-                    .GroupBy(
-                        x =>
-                            new
-                            {
-                                Name = x.Name.Namespace.ToString() + ":" + x.Name.LocalName,
-                                Attributes = string.Join(Environment.NewLine, x.Attributes().Select(y => y.Name.Namespace.ToString() + ":" + y.Name.LocalName + ":" + y.Value)),
-                            }
-                        )
+                     .GroupBy(
+                         x =>
+                         new
+                         {
+                             Name = x.Name.Namespace.ToString() + ":" + x.Name.LocalName,
+                             Attributes =
+                             string.Join(Environment.NewLine,
+                                 x.Attributes()
+                                  .Select(y => y.Name.Namespace.ToString() + ":" + y.Name.LocalName + ":" + y.Value)),
+                         }
+                    )
                 ;
-            foreach (var group in combineGroups) {
-                if (options.HasFlag(ArrangeOptions.CombineRootElements)) {
-                    var first = group.First();
+            foreach (var group in combineGroups)
+            {
+                if (options.HasFlag(ArrangeOptions.CombineRootElements))
+                {
+                    var first = @group.First();
                     // Combine multiple elements if they have the same name and attributes.
-                    if (group.Count() > 1) {
-                        var restGroup = group.Skip(1);
+                    if (@group.Count() > 1)
+                    {
+                        var restGroup = @group.Skip(1);
                         first.Add(restGroup.SelectMany(x => x.Elements()));
-                        foreach (var rest in restGroup) {
+                        foreach (var rest in restGroup)
+                        {
                             rest.Remove();
                         }
                     }
                     // Do the sorting.
                     ArrangeElement(first);
-                } else {
-                    foreach (var element in group) {
+                }
+                else
+                {
+                    foreach (var element in @group)
+                    {
                         ArrangeElement(element);
                     }
                 }
             }
 
-            if (options.HasFlag(ArrangeOptions.SplitItemGroups)) {
+            if (options.HasFlag(ArrangeOptions.SplitItemGroups))
+            {
                 var ns = input.Root.Name.Namespace;
-                foreach (var group in input.Root.Elements(ns + "ItemGroup")) {
+                foreach (var group in input.Root.Elements(ns + "ItemGroup"))
+                {
                     var uniqueTypes =
-                        group.Elements()
-                            .Select(x => x.Name)
-                            .Distinct()
-                            .OrderBy(x => stickyElementNames.IndexOf(x.LocalName) == -1 ? int.MaxValue : stickyElementNames.IndexOf(x.LocalName))
-                            .ThenBy(x => x.LocalName)
+                        @group.Elements()
+                             .Select(x => x.Name)
+                             .Distinct()
+                             .OrderBy(
+                                 x =>
+                                 stickyElementNames.IndexOf(x.LocalName) == -1
+                                     ? int.MaxValue
+                                     : stickyElementNames.IndexOf(x.LocalName))
+                             .ThenBy(x => x.LocalName)
                         ;
                     // Split into multiple item groups if there are multiple types included.
-                    if (uniqueTypes.Count() > 1) {
+                    if (uniqueTypes.Count() > 1)
+                    {
                         var firstType = uniqueTypes.First();
                         var restTypes = uniqueTypes.Skip(1).Reverse();
-                        foreach (var type in restTypes) {
-                            var newElement = new XElement(group.Name, group.Attributes(), group.Elements(type));
-                            group.AddAfterSelf(newElement);
+                        foreach (var type in restTypes)
+                        {
+                            var newElement = new XElement(@group.Name, @group.Attributes(), @group.Elements(type));
+                            @group.AddAfterSelf(newElement);
                         }
-                        group.ReplaceNodes(group.Elements(firstType));
+                        @group.ReplaceNodes(@group.Elements(firstType));
                     }
                 }
             }
-            if (options.HasFlag(ArrangeOptions.SortRootElements)) {
+            if (options.HasFlag(ArrangeOptions.SortRootElements))
+            {
                 // Sort the elements in root.
                 input.Root.ReplaceNodes(
                     input.Root.Nodes()
-                        .OrderBy(x => x, nodeNameComparer)
-                        .ThenBy(x => x.NodeType == XmlNodeType.Element ? ((XElement)x).Attributes() : null, attributeKeyComparer)
+                         .OrderBy(x => x, nodeNameComparer)
+                         .ThenBy(x => x.NodeType == XmlNodeType.Element ? ((XElement) x).Attributes() : null,
+                             attributeKeyComparer)
                     );
-            }
-            // Backup input file if we are overwriting.
-            if ((inputFile != null) && (inputFile == outputFile)) {
-                File.Copy(inputFile, inputFile + ".bak", true);
-            }
-
-            if (outputFile == null) {
-                // Write the output to standard output.
-                var writerSettings = new XmlWriterSettings();
-                writerSettings.Encoding = Encoding.UTF8;
-                writerSettings.Indent = true;
-                using (var writer = XmlWriter.Create(Console.OpenStandardOutput(), writerSettings)) {
-                    input.WriteTo(writer);
-                }
-            } else {
-                // Write the output file.
-                input.Save(outputFile);
             }
         }
 
